@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Offline Global Persona Generator</title>
+    <style>
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #0d1117;
+        color: #e6edf3;
+        max-width: 920px;
+        margin: 24px auto;
+        padding: 0 16px;
+        line-height: 1.5;
+      }
+      .bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        background: #161b22;
+        padding: 12px;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        margin-bottom: 16px;
+      }
+      select,
+      button {
+        background: #21262d;
+        color: #e6edf3;
+        border: 1px solid #30363d;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      button:hover,
+      select:hover {
+        border-color: #8b949e;
+      }
+      button.primary {
+        background: #238636;
+        border-color: #2ea043;
+        color: #fff;
+        font-weight: bold;
+      }
+      .badge {
+        margin-left: auto;
+        font-size: 11px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        background: #1f2428;
+        border: 1px solid #30363d;
+        color: #7ee787;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 12px;
+      }
+      .card {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 12px;
+      }
+      .card h3 {
+        margin: 0 0 8px 0;
+        font-size: 12px;
+        text-transform: uppercase;
+        color: #58a6ff;
+        border-bottom: 1px solid #21262d;
+        padding-bottom: 4px;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 12px;
+        padding: 3px 0;
+        border-bottom: 1px dashed #21262d;
+      }
+      .row span:first-child {
+        color: #8b949e;
+      }
+      .row span:last-child {
+        text-align: right;
+        word-break: break-all;
+        user-select: all;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <select id="loc"></select>
+      <select id="gnd">
+        <option value="ALL">Random Gender</option>
+        <option value="male">Male</option>
+        <option value="female">Female</option>
+      </select>
+      <button class="primary" id="btnGen">Generate</button>
+      <button id="btnTxt">Copy Text</button>
+      <button id="btnCsv">Copy CSV</button>
+      <button id="btnJson">Copy JSON</button>
+      <span class="badge" id="status">LOADING DATASET...</span>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <script type="module">
+      const BUNDLE_URL = "https://esm.sh/@faker-js/faker?bundle";
+      const DB_NAME = "OpsecPersonaDB",
+        STORE = "bundles",
+        KEY = "faker_esm_v1";
+
+      const openDB = () =>
+        new Promise((res, rej) => {
+          const req = indexedDB.open(DB_NAME, 1);
+          req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+          req.onsuccess = () => res(req.result);
+          req.onerror = () => rej(req.error);
+        });
+
+      const getCached = async () => {
+        const db = await openDB();
+        return new Promise((res, rej) => {
+          const req = db
+            .transaction(STORE, "readonly")
+            .objectStore(STORE)
+            .get(KEY);
+          req.onsuccess = () => res(req.result);
+          req.onerror = () => rej(req.error);
+        });
+      };
+
+      const setCached = async (code) => {
+        const db = await openDB();
+        return new Promise((res, rej) => {
+          const req = db
+            .transaction(STORE, "readwrite")
+            .objectStore(STORE)
+            .put(code, KEY);
+          req.onsuccess = () => res();
+          req.onerror = () => rej(req.error);
+        });
+      };
+
+      async function loadFaker() {
+        const badge = document.getElementById("status");
+        try {
+          let code = await getCached();
+          if (code) {
+            badge.textContent = "OFFLINE CACHE READY (0 NETWORK CALLS)";
+          } else {
+            badge.textContent = "FETCHING GLOBAL DATASET ONCE...";
+            const resp = await fetch(BUNDLE_URL);
+            code = await resp.text();
+            await setCached(code);
+            badge.textContent = "CACHED TO DISK (SAFE TO GO OFFLINE)";
+          }
+          const blobUrl = URL.createObjectURL(
+            new Blob([code], { type: "application/javascript" }),
+          );
+          return await import(blobUrl);
+        } catch {
+          badge.textContent = "LIVE CDN MODE (CACHE BLOCKED)";
+          return await import(BUNDLE_URL);
+        }
+      }
+
+      const { allFakers } = await loadFaker();
+      const en = allFakers.en;
+      const r = (a) => a[Math.floor(Math.random() * a.length)];
+      const n = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+      const p = (v, l) => String(v).padStart(l, "0");
+      const safe = (fn, fb) => {
+        try {
+          const v = fn();
+          return v !== undefined && v !== null ? v : fb();
+        } catch {
+          return fb();
+        }
+      };
+
+      const META = {
+        en_US: {
+          name: "United States",
+          cc: "1",
+          id: "SSN",
+          fmt: () =>
+            `${r(["666", n(900, 999)])}-${p(n(10, 99), 2)}-${p(n(1000, 9999), 4)}`,
+        },
+        en_GB: {
+          name: "United Kingdom",
+          cc: "44",
+          id: "NINO",
+          fmt: () =>
+            `${r(["BG", "GB", "NK", "TN", "ZZ"])}${p(n(10, 99), 2)}${p(n(10, 99), 2)}${p(n(10, 99), 2)}${r(["A", "B", "C", "D"])}`,
+        },
+        en_CA: {
+          name: "Canada",
+          cc: "1",
+          id: "SIN",
+          fmt: () =>
+            `0${p(n(10, 99), 2)}-${p(n(100, 999), 3)}-${p(n(100, 999), 3)}`,
+        },
+        en_AU: {
+          name: "Australia",
+          cc: "61",
+          id: "TFN",
+          fmt: () => `000 ${p(n(100, 999), 3)} ${p(n(100, 999), 3)}`,
+        },
+        en_IN: {
+          name: "India",
+          cc: "91",
+          id: "Aadhaar",
+          fmt: () =>
+            `0${p(n(100, 999), 3)} ${p(n(1000, 9999), 4)} ${p(n(1000, 9999), 4)}`,
+        },
+        de: {
+          name: "Germany",
+          cc: "49",
+          id: "Steuer-ID",
+          fmt: () => `0${p(n(1000, 9999), 4)}${p(n(100000, 999999), 6)}`,
+        },
+        fr: {
+          name: "France",
+          cc: "33",
+          id: "NIR",
+          fmt: () =>
+            `9 ${p(n(70, 99), 2)} ${p(n(1, 12), 2)} 75 ${p(n(100, 999), 3)} ${p(n(100, 999), 3)} ${p(n(10, 97), 2)}`,
+        },
+        es: {
+          name: "Spain",
+          cc: "34",
+          id: "DNI",
+          fmt: () =>
+            `000${p(n(10000, 99999), 5)}-${r("TRWAGMYFPDXBNJZSQVHLCKE")}`,
+        },
+        it: {
+          name: "Italy",
+          cc: "39",
+          id: "Codice Fiscale",
+          fmt: () => `ZZZXXX${p(n(70, 99), 2)}A${p(n(1, 28), 2)}H501Z`,
+        },
+        pt_BR: {
+          name: "Brazil",
+          cc: "55",
+          id: "CPF",
+          fmt: () => `000.${p(n(100, 999), 3)}.${p(n(100, 999), 3)}-00`,
+        },
+        nl: {
+          name: "Netherlands",
+          cc: "31",
+          id: "BSN",
+          fmt: () => `000${p(n(100000, 999999), 6)}`,
+        },
+        sv: {
+          name: "Sweden",
+          cc: "46",
+          id: "Personnummer",
+          fmt: () => `${n(1970, 2000)}${p(n(1, 12), 2)}${p(n(1, 28), 2)}-0000`,
+        },
+        pl: {
+          name: "Poland",
+          cc: "48",
+          id: "PESEL",
+          fmt: () =>
+            `${p(n(70, 99), 2)}${p(n(1, 12), 2)}${p(n(1, 28), 2)}00000`,
+        },
+        ja: {
+          name: "Japan",
+          cc: "81",
+          id: "MyNumber",
+          fmt: () =>
+            `0${p(n(100, 999), 3)} ${p(n(1000, 9999), 4)} ${p(n(1000, 9999), 4)}`,
+        },
+        ko: {
+          name: "South Korea",
+          cc: "82",
+          id: "RRN",
+          fmt: () =>
+            `${p(n(70, 99), 2)}${p(n(1, 12), 2)}${p(n(1, 28), 2)}-0000000`,
+        },
+        en_ZA: {
+          name: "South Africa",
+          cc: "27",
+          id: "ID Number",
+          fmt: () =>
+            `${p(n(70, 99), 2)}${p(n(1, 12), 2)}${p(n(1, 28), 2)}0000080`,
+        },
+      };
+
+      const luhn = (pre) => {
+        let s = pre;
+        while (s.length < 15) s += n(0, 9);
+        let sum = 0;
+        for (let i = 0; i < 15; i++) {
+          let d = +s[14 - i];
+          if (i % 2 === 0) {
+            d *= 2;
+            if (d > 9) d -= 9;
+          }
+          sum += d;
+        }
+        return (s + ((10 - (sum % 10)) % 10)).replace(/(.{4})/g, "$1 ").trim();
+      };
+
+      const locales = Object.keys(META);
+      const locSel = document.getElementById("loc");
+      locSel.innerHTML =
+        `<option value="ALL">Random Global (16 Countries)</option>` +
+        locales
+          .map((k) => `<option value="${k}">${META[k].name} (${k})</option>`)
+          .join("");
+
+      let outTxt = "",
+        outCsv = "",
+        outJson = "";
+
+      function generate() {
+        const locKey = locSel.value === "ALL" ? r(locales) : locSel.value;
+        const gSel = document.getElementById("gnd").value;
+        const sex = gSel === "ALL" ? r(["male", "female"]) : gSel;
+        const f = allFakers[locKey] || en;
+        const m = META[locKey];
+
+        const fn = safe(
+          () => f.person.firstName(sex),
+          () => en.person.firstName(sex),
+        );
+        const mn = safe(
+          () => f.person.middleName(sex),
+          () => en.person.middleName(sex),
+        );
+        const ln = safe(
+          () => f.person.lastName(),
+          () => en.person.lastName(),
+        );
+        const mmn = safe(
+          () => f.person.lastName(),
+          () => en.person.lastName(),
+        );
+        const dobDate = safe(
+          () => f.date.birthdate({ min: 1968, max: 2002, mode: "year" }),
+          () => en.date.birthdate({ min: 1968, max: 2002, mode: "year" }),
+        );
+        const age = Math.floor((new Date() - dobDate) / 31557600000);
+        const cm = n(156, 194),
+          inch = Math.round(cm / 2.54);
+        const kg = (n(520, 980) / 10).toFixed(1),
+          lb = (kg * 2.20462).toFixed(1);
+        const card = r([
+          ["Visa", "4532"],
+          ["Mastercard", "5425"],
+          ["JCB", "3530"],
+        ]);
+        const cleanUser =
+          `${fn}.${ln}`.replace(/[^a-zA-Z0-9.]/g, "").toLowerCase() ||
+          `user${n(100, 999)}`;
+
+        const sections = {
+          "Identity & Location": {
+            Country: m.name,
+            Gender: sex === "male" ? "Male" : "Female",
+            Full_Name: `${fn} ${mn[0]}. ${ln}`,
+            Street_Address: safe(
+              () => f.location.streetAddress(),
+              () => en.location.streetAddress(),
+            ),
+            City: safe(
+              () => f.location.city(),
+              () => en.location.city(),
+            ),
+            Region: safe(
+              () => f.location.state(),
+              () => en.location.state(),
+            ),
+            Postal_Code: safe(
+              () => f.location.zipCode(),
+              () => en.location.zipCode(),
+            ),
+          },
+          "Contact & Online": {
+            Country_Code: `+${m.cc}`,
+            Phone: safe(
+              () => f.phone.number(),
+              () => en.phone.number(),
+            ),
+            Email: `${cleanUser}${n(10, 99)}@example.com`,
+            Coordinates: `${safe(
+              () => f.location.latitude(),
+              () => en.location.latitude(),
+            )}, ${safe(
+              () => f.location.longitude(),
+              () => en.location.longitude(),
+            )}`,
+            Username: `${cleanUser.replace(".", "")}${dobDate.getFullYear()}`,
+            Password: safe(
+              () => en.internet.password({ length: 14, memorable: false }),
+              () => "Xk9#mP2$vL8@qR",
+            ),
+            Website: `https://${ln.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "group"}-ops.example.org`,
+            User_Agent: safe(
+              () => en.internet.userAgent(),
+              () => navigator.userAgent,
+            ),
+          },
+          "Personal & Finance": {
+            Birthday: dobDate.toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            }),
+            Age: `${age} years old`,
+            Tropical_Zodiac: safe(
+              () => en.person.zodiacSign(),
+              () => "Aquarius",
+            ),
+            Mothers_Maiden_Name: mmn,
+            ID_Type: m.id,
+            ID_Number: m.fmt(),
+            Card_Type: card[0],
+            Card_Number: luhn(card[1]),
+            Card_Expires: `${n(1, 12)}/${n(2028, 2031)}`,
+            CVV2: p(n(100, 999), 3),
+          },
+          "Work, Physical & Vehicle": {
+            Company: safe(
+              () => f.company.name(),
+              () => en.company.name(),
+            ),
+            Occupation: safe(
+              () => f.person.jobTitle(),
+              () => en.person.jobTitle(),
+            ),
+            Height: `${Math.floor(inch / 12)}' ${inch % 12}" (${cm} cm)`,
+            Weight: `${lb} lb (${kg} kg)`,
+            Blood_Type: r(["O+", "A+", "B+", "AB+", "O-", "A-", "B-", "AB-"]),
+            Favorite_Color: safe(
+              () => en.color.human(),
+              () => "Blue",
+            ),
+            Vehicle: `${n(2014, 2025)} ${safe(
+              () => en.vehicle.vehicle(),
+              () => "Honda Odyssey",
+            )}`,
+            VIN: safe(
+              () => en.vehicle.vin(),
+              () => "5FNRL5H97CB198869",
+            ),
+            GUID: crypto.randomUUID(),
+          },
+        };
+
+        const flat = Object.assign({}, ...Object.values(sections));
+        const ent = Object.entries(flat);
+        outTxt = ent.map(([k, v]) => `${k}: ${v}`).join("\n");
+        outCsv = `${ent.map(([k]) => k).join(",")}\n${ent.map(([, v]) => `"${String(v).replace(/"/g, '""')}"`).join(",")}`;
+        outJson = JSON.stringify(flat, null, 2);
+
+        document.getElementById("grid").innerHTML = Object.entries(sections)
+          .map(
+            ([title, fields]) => `
+    <div class="card">
+      <h3>${title}</h3>
+      ${Object.entries(fields)
+        .map(
+          ([k, v]) =>
+            `<div class="row"><span>${k}</span><span>${v}</span></div>`,
+        )
+        .join("")}
+    </div>
+  `,
+          )
+          .join("");
+      }
+
+      const flash = (btn, label) => {
+        const orig = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => (btn.textContent = orig), 900);
+      };
+      document.getElementById("btnGen").onclick = generate;
+      locSel.onchange = generate;
+      document.getElementById("gnd").onchange = generate;
+      document.getElementById("btnTxt").onclick = (e) => {
+        navigator.clipboard.writeText(outTxt);
+        flash(e.target);
+      };
+      document.getElementById("btnCsv").onclick = (e) => {
+        navigator.clipboard.writeText(outCsv);
+        flash(e.target);
+      };
+      document.getElementById("btnJson").onclick = (e) => {
+        navigator.clipboard.writeText(outJson);
+        flash(e.target);
+      };
+
+      generate();
+    </script>
+  </body>
+</html>
